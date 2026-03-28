@@ -3,8 +3,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from django.test import override_settings
 
-from apps.slack.blocks import markdown
-from apps.slack.commands.gsoc import Gsoc
+from apps.slack.commands.gsoc import SUPPORTED_YEAR_START, Gsoc, get_supported_years
+from apps.slack.common.gsoc import get_gsoc_year
 from apps.slack.constants import FEEDBACK_SHARING_INVITE
 
 
@@ -26,13 +26,18 @@ class TestGsocCommand:
         ("commands_enabled", "command_text", "expected_message"),
         [
             (False, "", None),
-            (True, "", "GSOC_GENERAL_INFORMATION_BLOCKS"),
+            (True, "", "Getting Started with OWASP GSoC"),
             (
                 True,
                 "invalid",
                 "*`/gsoc invalid` is not supported",
             ),
-            (True, "2011", "Year 2011 is not supported. Supported years: 2012-2026"),
+            (
+                True,
+                "2011",
+                f"Year 2011 is not supported. Supported years: "
+                f"{SUPPORTED_YEAR_START}-{max(get_supported_years())}",
+            ),
         ],
     )
     def test_handler_responses(
@@ -40,13 +45,7 @@ class TestGsocCommand:
     ):
         command = {"text": command_text, "user_id": "U123456"}
 
-        with (
-            override_settings(SLACK_COMMANDS_ENABLED=commands_enabled),
-            patch(
-                "apps.slack.common.gsoc.GSOC_GENERAL_INFORMATION_BLOCKS",
-                new=[markdown("GSOC_GENERAL_INFORMATION_BLOCKS")],
-            ),
-        ):
+        with override_settings(SLACK_COMMANDS_ENABLED=commands_enabled):
             ack = MagicMock()
             Gsoc().handler(ack=ack, command=command, client=mock_slack_client)
 
@@ -95,14 +94,15 @@ class TestGsocCommand:
             )
 
     @override_settings(SLACK_COMMANDS_ENABLED=True)
-    def test_handler_with_2026_projects(self, mock_slack_client):
+    def test_handler_with_current_year_projects(self, mock_slack_client):
+        current_year = get_gsoc_year()
         mock_projects = [
             {
-                "idx_name": "Test Project 2026",
+                "idx_name": f"Test Project {current_year}",
                 "idx_url": "https://owasp.org/www-project-test/",
             }
         ]
-        command = {"text": "2026", "user_id": "U123456"}
+        command = {"text": str(current_year), "user_id": "U123456"}
         with patch(
             "apps.slack.commands.gsoc.get_gsoc_projects",
             return_value=mock_projects,
@@ -115,4 +115,7 @@ class TestGsocCommand:
             blocks = mock_slack_client.chat_postMessage.call_args[1]["blocks"]
             project_block = str(blocks[0])
 
-            assert "<https://owasp.org/www-project-test/|Test Project 2026>" in project_block
+            assert (
+                f"<https://owasp.org/www-project-test/|Test Project {current_year}>"
+                in project_block
+            )
